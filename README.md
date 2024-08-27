@@ -4,8 +4,7 @@
 
 https://github.com/r3sist/sorfi-webextensions/
 
-(c) 2022 ![bV](https://structure.hu/img/bV.png)  
-https://sorfi.org
+(c) 2022 resist | https://resist.hu | https://sorfi.org
 
 (c) 2018 Speeder
 
