@@ -1,23 +1,32 @@
 ﻿const baseUrl = "https://sorfi.org/";
 
-window.addEventListener('load', function() {
-	// If the content cache is from the last hour, instantly display the content
-	if (localStorage.contentCache && localStorage.contentCacheTS)
-	{
-		let oldestTS = Date.now();
-		oldestTS = oldestTS - 3600 * 1000;
-		if (oldestTS < localStorage.contentCacheTS)
-			document.getElementById("sfdata").insertAdjacentHTML("afterbegin", localStorage.getItem("contentCache"));
-	}
-	// Display the footer link to the settings page
-	document.getElementById("footer").insertAdjacentHTML('afterbegin', `<small class=""><a href="${chrome.extension.getURL("src/sf-ch-opt.html")}" target="_blank">Beállítások</a></small>`);
+// Initialize global variables
+window.nightMode = false;
 
-	const night = JSON.parse(localStorage.getItem('night'));
-	if (night === true) {
-		document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome-dark.css" rel="stylesheet">`);
-	} else {
-		document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome.css" rel="stylesheet">`);
-	}
+window.addEventListener('load', function() {
+	// Display the footer link to the settings page
+	document.getElementById("footer").insertAdjacentHTML('afterbegin', `<small class=""><a href="${chrome.runtime.getURL("src/sf-ch-opt.html")}" target="_blank">Beállítások</a></small>`);
+
+	// Get settings and cached content from storage
+	chrome.storage.local.get(["contentCache", "contentCacheTS", "night"], function(result) {
+		// If the content cache is from the last hour, instantly display the content
+		if (result.contentCache && result.contentCacheTS) {
+			let oldestTS = Date.now() - 3600 * 1000;
+			if (oldestTS < result.contentCacheTS) {
+				document.getElementById("sfdata").insertAdjacentHTML("afterbegin", result.contentCache);
+			}
+		}
+
+		// Set global night mode variable
+		window.nightMode = result.night === true;
+
+		// Apply theme based on night mode setting
+		if (window.nightMode) {
+			document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome-dark.css" rel="stylesheet">`);
+		} else {
+			document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome.css" rel="stylesheet">`);
+		}
+	});
 });
 
 // Downloaded/Watched button handler
@@ -52,24 +61,32 @@ function toggleButtonAction(element)
 		return;
 	}
 
-	// Send the request
-	const req = new XMLHttpRequest();
-	req.open("POST", `${baseUrl}api/mark/${action}/${programmeId}/${episodeId}/${localStorage.keypass}`, true);
-	req.onreadystatechange = function () {
-		if (req.readyState !== 4 || req.status !== 200) {
+	// Get API key from storage
+	chrome.storage.local.get(["keypass"], function(result) {
+		if (!result.keypass) {
+			console.error("API key not found");
 			return;
 		}
 
-		element.setAttribute("src", newImageSrc);
+		// Send the request
+		const req = new XMLHttpRequest();
+		req.open("POST", `${baseUrl}api/mark/${action}/${programmeId}/${episodeId}/${result.keypass}`, true);
+		req.onreadystatechange = function () {
+			if (req.readyState !== 4 || req.status !== 200) {
+				return;
+			}
 
-		// Message the background script to update the episode counter
-		if (needCounterUpdate)
-			chrome.runtime.sendMessage({
-				action: 'requestUpdateCount',
-				counterAdjust: action === 'w' ? -1 : 1
-			});
-	};
-	req.send();
+			element.setAttribute("src", newImageSrc);
+
+			// Message the background script to update the episode counter
+			if (needCounterUpdate)
+				chrome.runtime.sendMessage({
+					action: 'requestUpdateCount',
+					counterAdjust: action === 'w' ? -1 : 1
+				});
+		};
+		req.send();
+	});
 }
 
 // Returns formatted HTML content for an episode
@@ -80,8 +97,8 @@ function renderEpisodeRow(episode)
 	}
 
 	let bgClass = "bg-light";
-	const night = JSON.parse(localStorage.getItem('night'));
-	if (night === true) {
+	// Get night mode setting from global variable set during page load
+	if (window.nightMode === true) {
 		bgClass = "bg-dark";
 	}
 
@@ -159,8 +176,11 @@ function processOverviewResponse(request)
 	}
 
 	// Save the html content in the local cache for faster display next time
-	localStorage.contentCache = sfdata.innerHTML;
-	localStorage.contentCacheTS = Date.now();
+	const cacheData = {
+		contentCache: sfdata.innerHTML,
+		contentCacheTS: Date.now()
+	};
+	chrome.storage.local.set(cacheData);
 
 	// Sign up for image click events on all buttons
 	for (let img of document.querySelectorAll('.c-button')) {
@@ -173,12 +193,21 @@ function processOverviewResponse(request)
 // Main function upon opening the dropdown window
 function requestOverviewData()
 {
-	const request = new XMLHttpRequest();
-	request.open("GET", baseUrl + 'api/overview/' + localStorage.keypass, true);
-	request.onreadystatechange = function () {
-		processOverviewResponse(request); 
-	};
-	request.send();
+	// Get API key from storage
+	chrome.storage.local.get(["keypass"], function(result) {
+		if (!result.keypass) {
+			let sfdata = document.getElementById("sfdata");
+			sfdata.innerHTML = `<p class="text-danger text-small">API kulcs hiányzik. Kérlek, add meg a Beállításokban!</p>`;
+			return;
+		}
+
+		const request = new XMLHttpRequest();
+		request.open("GET", baseUrl + 'api/overview/' + result.keypass, true);
+		request.onreadystatechange = function () {
+			processOverviewResponse(request); 
+		};
+		request.send();
+	});
 }
 
 requestOverviewData();

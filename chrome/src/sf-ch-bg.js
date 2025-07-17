@@ -1,37 +1,46 @@
 const baseUrl = "https://sorfi.org/";
-const counterUpdatesInMilliseconds = 600000; // 10 minutes
-const subtitleCheckingInMilliseconds = 600000; // 10 minutes
+const COUNTER_ALARM_NAME = "updateCounterAlarm";
+const SUBTITLE_ALARM_NAME = "checkSubtitleAlarm";
+const ALARM_PERIOD_MINUTES = 10;
 
-// Prepare Local Storage
-if (!localStorage.getItem("isInitialized"))
-{
-    localStorage.setItem("keypass", "0");
-    localStorage.setItem("isInitialized", "true");
-}
+let lastAvailableCount = 0;
+let ID2 = 0;
+let refTime = Math.round((new Date()).getTime() / 1000);
 
-let ID = 0;
-var lastAvailableCount = 0;
+// Initialize storage if needed
+chrome.storage.local.get(["isInitialized"], function(result) {
+    if (!result.isInitialized) {
+        chrome.storage.local.set({
+            keypass: "0",
+            isInitialized: true
+        });
+    }
+});
 
 // Update Counter
-function updateCounter(hint = 0)
-{
-	chrome.browserAction.setBadgeBackgroundColor({ color: "#e3423e" }); // Windows red
-	// chrome.browserAction.setBadgeTextColor({ color: "#ffffff" }); // Firefox only: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/browserAction/setBadgeTextColor
-	if (hint) {
-        chrome.browserAction.setBadgeText({ text: (lastAvailableCount + hint).toString() });
-    }
+async function updateCounter(hint = 0) {
+    chrome.action.setBadgeBackgroundColor({ color: "#e3423e" }); // Windows red
 
-    const req = new XMLHttpRequest();
-    req.open("GET", baseUrl + 'api/overview/' + localStorage.keypass, true);
-	req.onreadystatechange = function () {
-		if (req.readyState !== 4 || req.status !== 200) {
-            return;
+    try {
+        // Get keypass from storage
+        const result = await chrome.storage.local.get(["keypass"]);
+        const keypass = result.keypass || "0";
+
+        if (hint) {
+            chrome.action.setBadgeText({ text: (lastAvailableCount + hint).toString() });
         }
 
-		// Process JSON and get unwatched and released count
-		let data = JSON.parse(req.responseText);
-		let availableCount = 0;
-		for (let i = 0, len = data.length; i < len; i++) {
+        // Fetch data from API
+        const response = await fetch(baseUrl + 'api/overview/' + keypass);
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+
+        const data = await response.json();
+
+        // Process JSON and get unwatched and released count
+        let availableCount = 0;
+        for (let i = 0, len = data.length; i < len; i++) {
             if (data[i]["isAired"] && !data[i]["markedAsWatched"]) {
                 ++availableCount;
             }
@@ -39,26 +48,24 @@ function updateCounter(hint = 0)
 
         lastAvailableCount = availableCount;
         if (availableCount > 0) {
-            chrome.browserAction.setBadgeText({ text: availableCount.toString() });
+            chrome.action.setBadgeText({ text: availableCount.toString() });
+        } else {
+            chrome.action.setBadgeText({ text: "" });
         }
-	};
-	req.send();
+    } catch (error) {
+        console.error("Error updating counter:", error);
+    }
 }
 
-function handleMessage(request, sender)
-{
-	if (request.action === "requestUpdateCount")
-		updateCounter(request.counterAdjust);
+// Handle messages from other parts of the extension
+function handleMessage(request, sender, sendResponse) {
+    if (request.action === "requestUpdateCount") {
+        updateCounter(request.counterAdjust);
+    }
+    return true; // Indicates async response
 }
-chrome.runtime.onMessage.addListener(handleMessage); // Add a listener for incoming messages
 
-updateCounter();
-setInterval(updateCounter, counterUpdatesInMilliseconds);
-
-// Subtitle checker from v3.0.0
-let ID2 = 0;
-let refTime = Math.round((new Date()).getTime() / 1000);
-
+// Show notification for new subtitle
 function showNotification(subtitle) {
     ID2++;
 
@@ -71,43 +78,101 @@ function showNotification(subtitle) {
         requireInteraction: true
     };
 
-    chrome.notifications.create("id" + ID2, opts, creationCallback);
+    chrome.notifications.create("id" + ID2, opts, function() {
+        console.log("Új felirat ablak: " + ID2);
+    });
 }
 
-function creationCallback() {
-    console.log("Új felirat ablak: "+ID2);
-}
-
+// Handle notification button click
 function notificationBtnClick(notID, iBtn) {
     chrome.tabs.create({ 'url': baseUrl });
 }
 
-function checkSubtitle() {
-    setInterval(function() {
-        if (localStorage.getItem("keypass") && localStorage.getItem("keypass") !== "0") {
-            const req2 = new XMLHttpRequest();
-            req2.open("POST", `${baseUrl}api/subtitle/alert/${refTime}/${localStorage.getItem("keypass")}`, true);
-            req2.onreadystatechange = function() {
-                if (req2.readyState === 4) {
-                    if (req2.status === 200) {
-                        if (req2.responseText.length >= 1) {
-                            const subs = JSON.parse(req2.responseText);
-                            for (let i = 0, len = subs.length; i < len; i++) {
-                                showNotification(subs[i]);
-                            }
-                        }
-                        refTime = Math.round((new Date()).getTime() / 1000);
-                    }
-                }
-            };
-            req2.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-            req2.send("referenceZone=" + encodeURI(Intl.DateTimeFormat().resolvedOptions().timeZone));
+// Check for new subtitles
+async function checkSubtitle() {
+    try {
+        // Get settings from storage
+        const result = await chrome.storage.local.get(["keypass", "subtitleChecking"]);
+        const keypass = result.keypass;
+        const subtitleChecking = result.subtitleChecking;
+
+        if (!subtitleChecking || !keypass || keypass === "0") {
+            return;
         }
-    }, subtitleCheckingInMilliseconds);
+
+        // Get timezone
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        // Prepare form data
+        const formData = new URLSearchParams();
+        formData.append("referenceZone", timeZone);
+
+        // Fetch data from API
+        const response = await fetch(
+            `${baseUrl}api/subtitle/alert/${refTime}/${keypass}`, 
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: formData
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+
+        const text = await response.text();
+
+        if (text.length >= 1) {
+            const subs = JSON.parse(text);
+            for (let i = 0, len = subs.length; i < len; i++) {
+                showNotification(subs[i]);
+            }
+        }
+
+        refTime = Math.round((new Date()).getTime() / 1000);
+    } catch (error) {
+        console.error("Error checking subtitles:", error);
+    }
 }
 
-const subtitleChecking = JSON.parse(localStorage.getItem("subtitleChecking"));
-if (subtitleChecking === true) {
-    document.addEventListener("DOMContentLoaded", checkSubtitle);
-    chrome.notifications.onButtonClicked.addListener(notificationBtnClick);
+// Set up alarms for periodic tasks
+function setupAlarms() {
+    // Create alarm for updating counter
+    chrome.alarms.create(COUNTER_ALARM_NAME, {
+        periodInMinutes: ALARM_PERIOD_MINUTES
+    });
+
+    // Create alarm for checking subtitles
+    chrome.alarms.create(SUBTITLE_ALARM_NAME, {
+        periodInMinutes: ALARM_PERIOD_MINUTES
+    });
 }
+
+// Handle alarm events
+function handleAlarm(alarm) {
+    if (alarm.name === COUNTER_ALARM_NAME) {
+        updateCounter();
+    } else if (alarm.name === SUBTITLE_ALARM_NAME) {
+        checkSubtitle();
+    }
+}
+
+// Event listeners
+chrome.runtime.onMessage.addListener(handleMessage);
+chrome.alarms.onAlarm.addListener(handleAlarm);
+chrome.notifications.onButtonClicked.addListener(notificationBtnClick);
+
+// Initialize on install or update
+chrome.runtime.onInstalled.addListener(() => {
+    setupAlarms();
+    updateCounter();
+    checkSubtitle();
+});
+
+// Initialize when service worker starts
+setupAlarms();
+updateCounter();
+checkSubtitle();

@@ -1,46 +1,60 @@
 /*
  * Sorozat figyelő 10 | https://sorfi.org
- * (c) 2009-2022 Bence VÁNKOS | https://resist.hu
+ * (c) 2009-2023 Bence VÁNKOS | https://resist.hu
  *
  * Script of option page of browser extension
  */
 
-// Initialize options page
-const night = JSON.parse(localStorage.getItem('night'));
-if (night === true) {
-    document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome-dark.css" rel="stylesheet">`);
-} else {
-    document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome.css" rel="stylesheet">`);
+// Initialize options page with theme
+function initTheme(isNightMode) {
+    if (isNightMode) {
+        document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome-dark.css" rel="stylesheet">`);
+    } else {
+        document.querySelector("head").insertAdjacentHTML("afterbegin", `<link href="../css/sorfi-bootstrap-chrome.css" rel="stylesheet">`);
+    }
 }
 
-// Save settings
+// Load settings and initialize page
 window.addEventListener('load', function() {
-    // Variables
-    options.nptKp.value = localStorage.getItem("keypass");
+    // Get all settings from storage
+    chrome.storage.local.get(["keypass", "night", "subtitleChecking"], function(result) {
+        // Set API key field
+        if (result.keypass) {
+            options.nptKp.value = result.keypass;
+        }
 
-    let night = JSON.parse(localStorage.getItem('night'));
-    if (night === true) {
-        document.getElementById("nptNight").checked = true;
-    }
+        // Set night mode checkbox
+        if (result.night === true) {
+            document.getElementById("nptNight").checked = true;
+        }
 
-    let subtitleChecking = JSON.parse(localStorage.getItem('subtitleChecking'));
-    if (subtitleChecking === true) {
-        document.getElementById("nptSub").checked = true;
-    }
+        // Initialize theme based on setting
+        initTheme(result.night === true);
 
-    // Save settings
-    options.nptKp.onchange = function() {
-        localStorage.setItem("keypass", options.nptKp.value);
-        document.getElementById("console").innerText = "API kulcs automatikusan mentésre került.";
-    };
-    
-    options.nptNight.onchange = function() {
-        localStorage.setItem("night", options.nptNight.checked);
-        document.getElementById("console").innerText = "Téma beállítás automatikusan mentésre került.";
-    };
+        // Set subtitle checking checkbox
+        if (result.subtitleChecking === true) {
+            document.getElementById("nptSub").checked = true;
+        }
 
-    options.nptSub.onchange = function() {
-        localStorage.setItem("subtitleChecking", options.nptSub.checked);
-        document.getElementById("console").innerText = "Felirat értesítő beállítás automatikusan mentésre került.";
-    };
+        // Save API key setting
+        options.nptKp.onchange = function() {
+            chrome.storage.local.set({ keypass: options.nptKp.value }, function() {
+                document.getElementById("console").innerText = "API kulcs automatikusan mentésre került.";
+            });
+        };
+
+        // Save night mode setting
+        options.nptNight.onchange = function() {
+            chrome.storage.local.set({ night: options.nptNight.checked }, function() {
+                document.getElementById("console").innerText = "Téma beállítás automatikusan mentésre került.";
+            });
+        };
+
+        // Save subtitle checking setting
+        options.nptSub.onchange = function() {
+            chrome.storage.local.set({ subtitleChecking: options.nptSub.checked }, function() {
+                document.getElementById("console").innerText = "Felirat értesítő beállítás automatikusan mentésre került.";
+            });
+        };
+    });
 });
