@@ -2,7 +2,7 @@
 
 **Browser extension for [Sorozat figyelő](https://sorfi.org) , using webextension API of Chrome/Firefox/Opera**
 
-https://github.com/r3sist/sorfi-webextensions/
+https://github.com/resist/sorfi-webextensions/
 
 (c) 2022 resist | https://resist.hu | https://sorfi.org
 
@@ -21,7 +21,7 @@ For more details visit wiki: https://sorfi.org/dokumentacio/app
 
 ## Releases and builds
 
-+ https://github.com/r3sist/sorfi-webextensions/releases
++ https://github.com/resist/sorfi-webextensions/releases
 
 ## Distributions in web stores
 
